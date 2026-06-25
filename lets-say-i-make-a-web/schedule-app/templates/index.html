@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schedule App</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-year="{{ year }}" data-month="{{ month }}">
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Personal planner</p>
+        <h1>My Schedule</h1>
+      </div>
+      <button class="ghost-button" id="notifyButton" type="button">Allow notifications</button>
+    </header>
+
+    <section class="planner">
+      <div class="calendar-panel">
+        <div class="month-toolbar">
+          <button class="icon-button" id="prevMonth" type="button" aria-label="Previous month">&lt;</button>
+          <h2 id="monthLabel">Month</h2>
+          <button class="icon-button" id="nextMonth" type="button" aria-label="Next month">&gt;</button>
+        </div>
+
+        <div class="weekday-row" id="weekdayRow"></div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </div>
+
+      <aside class="task-panel">
+        <div class="selected-day">
+          <p class="eyebrow">Selected date</p>
+          <h2 id="selectedDateLabel">Today</h2>
+        </div>
+
+        <form id="taskForm" class="task-form">
+          <label>
+            Task
+            <input id="taskTitle" name="title" type="text" maxlength="120" placeholder="Study, workout, call..." required>
+          </label>
+
+          <div class="form-row">
+            <label>
+              Date
+              <input id="taskDate" name="due_date" type="date" required>
+            </label>
+            <label>
+              Time
+              <input id="taskTime" name="due_time" type="time" required>
+            </label>
+          </div>
+
+          <label>
+            Notes
+            <textarea id="taskNotes" name="notes" rows="3" placeholder="Optional"></textarea>
+          </label>
+
+          <button class="primary-button" type="submit">Add task</button>
+          <p class="form-message" id="formMessage" role="status"></p>
+        </form>
+
+        <div class="day-tasks">
+          <div class="section-heading">
+            <h3>Tasks</h3>
+            <span id="taskCount">0</span>
+          </div>
+          <div class="task-list" id="selectedTaskList"></div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="toast-area" id="toastArea" aria-live="polite"></div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
