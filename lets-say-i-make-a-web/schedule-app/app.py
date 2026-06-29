@@ -5,8 +5,8 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
-
+from flask import Flask, jsonify, render_template, request, session
+import uuid
 from notifications import get_due_tasks, mark_notified
 
 
@@ -14,8 +14,11 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tasks.db"
 
 app = Flask(__name__)
-
-
+app.secret_key = "jjjjjjjiiiii"
+@app.before_request
+def ensure_user():
+    if "user_id" not in session:
+        session["user_id"] = str(uuid.uuid4())
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -28,6 +31,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 notes TEXT DEFAULT '',
                 due_date TEXT NOT NULL,
@@ -39,6 +43,22 @@ def init_db() -> None:
             )
             """
         )
+
+        columns = [
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(tasks)"
+            )
+        ]
+
+        if "user_id" not in columns:
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN user_id TEXT"
+            )
+            conn.execute(
+                "UPDATE tasks SET user_id = 'old_user'"
+            )
+
         conn.commit()
 
 
@@ -72,10 +92,11 @@ def month_payload(year: int, month: int) -> dict:
             """
             SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
             FROM tasks
-            WHERE due_date BETWEEN ? AND ?
+            WHERE user_id = ?
+            AND due_date BETWEEN ? AND ?
             ORDER BY due_date ASC, due_time ASC, created_at ASC
             """,
-            (start, end),
+            (session["user_id"], start, end),
         ).fetchall()
 
     tasks_by_day: dict[str, list[dict]] = {}
@@ -152,10 +173,10 @@ def create_task():
     with get_db() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO tasks (title, notes, due_date, due_time, due_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO tasks (user_id, title, notes, due_date, due_time, due_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (title, notes, due_date, due_time, due.strftime("%Y-%m-%d %H:%M:%S")),
+            (session["user_id"], title, notes, due_date, due_time, due.strftime("%Y-%m-%d %H:%M:%S")),
         )
         task_id = cursor.lastrowid
         conn.commit()
@@ -164,9 +185,9 @@ def create_task():
             """
             SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
             FROM tasks
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (task_id,),
+            (task_id, session["user_id"]),
         ).fetchone()
 
     return jsonify(task_to_dict(task)), 201
@@ -181,9 +202,9 @@ def update_task(task_id: int):
             """
             SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
             FROM tasks
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (task_id,),
+            (task_id, session["user_id"]),
         ).fetchone()
 
         if row is None:
@@ -212,8 +233,9 @@ def update_task(task_id: int):
             SET title = ?, notes = ?, due_date = ?, due_time = ?, due_at = ?,
                 completed = ?, notified = ?
             WHERE id = ?
+            AND user_id = ?
             """,
-            (title, notes, due_date, due_time, due_at, completed, notified, task_id),
+            (title, notes, due_date, due_time, due_at, completed, notified, task_id, session["user_id"]),
         )
         conn.commit()
 
@@ -222,8 +244,9 @@ def update_task(task_id: int):
             SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
             FROM tasks
             WHERE id = ?
+            AND user_id = ?
             """,
-            (task_id,),
+            (task_id, session["user_id"]),
         ).fetchone()
 
     return jsonify(task_to_dict(updated))
@@ -232,7 +255,7 @@ def update_task(task_id: int):
 @app.delete("/tasks/<int:task_id>")
 def delete_task(task_id: int):
     with get_db() as conn:
-        cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        cursor = conn.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"]))
         conn.commit()
 
     if cursor.rowcount == 0:
@@ -244,7 +267,10 @@ def delete_task(task_id: int):
 @app.get("/api/due")
 def api_due():
     with get_db() as conn:
-        due_tasks = get_due_tasks(conn)
+        due_tasks = get_due_tasks(
+        conn,
+        session["user_id"],
+)
         mark_notified(conn, [task["id"] for task in due_tasks])
         conn.commit()
 
