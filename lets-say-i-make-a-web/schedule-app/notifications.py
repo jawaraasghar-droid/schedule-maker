@@ -4,22 +4,27 @@ import sqlite3
 from datetime import datetime
 
 
-def get_due_tasks(conn: sqlite3.Connection, now: datetime | None = None) -> list[dict]:
-    """Return incomplete tasks whose due time has arrived and were not notified yet."""
-    current_time = now or datetime.now()
-    rows = conn.execute(
+def get_due_tasks(
+    conn: sqlite3.Connection,
+    user_id: str,
+    now: datetime | None = None,
+    ) -> list[dict]:    
+        current_time = now or datetime.now()
+        rows = conn.execute(
         """
         SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
         FROM tasks
-        WHERE completed = 0
+        WHERE user_id = ?
+          AND completed = 0
+          AND user_id = ?
           AND notified = 0
           AND due_at <= ?
         ORDER BY due_at ASC
         """,
-        (current_time.strftime("%Y-%m-%d %H:%M:%S"),),
+        (user_id, current_time.strftime("%Y-%m-%d %H:%M:%S")),
     ).fetchall()
 
-    return [
+        return [
         {
             "id": row["id"],
             "title": row["title"],
