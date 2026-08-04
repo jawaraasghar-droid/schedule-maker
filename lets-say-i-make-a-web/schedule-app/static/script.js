@@ -246,6 +246,11 @@ async function toggleTask(taskId, completed) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ completed }),
   });
+
+  if (completed) {
+    clearToast(taskId);
+  }
+
   await loadMonth();
 }
 
@@ -260,6 +265,7 @@ async function setReminder(taskId, remindBefore) {
 
 async function deleteTask(taskId) {
   await fetch(`/tasks/${taskId}`, { method: "DELETE" });
+  clearToast(taskId);
   await loadMonth();
 }
 
@@ -290,18 +296,72 @@ function reminderSentence(task) {
   return `Starts in ${leadPhrase(task.remind_before)} — ${when}`;
 }
 
+// reminders dismissed by hand: cleared on reload, so an unfinished task nags again
+const dismissedReminders = new Set();
+
 function showToast(task) {
+  // already on screen: leave it alone rather than rebuilding it every poll
+  if (toastArea.querySelector(`[data-toast-task="${task.id}"]`)) {
+    return;
+  }
+
   const toast = document.createElement("div");
   toast.className = "toast";
+  toast.dataset.toastTask = String(task.id);
   toast.innerHTML = `
     <strong>${escapeHtml(task.title)}</strong>
     <p>${escapeHtml(reminderSentence(task))}</p>
+    <div class="toast-actions">
+      <button class="small-button toast-done" type="button" data-toast-done="${task.id}">Mark done</button>
+      <button class="small-button" type="button" data-toast-dismiss="${task.id}">Dismiss</button>
+    </div>
   `;
   toastArea.appendChild(toast);
+}
 
-  window.setTimeout(() => {
+function clearToast(taskId) {
+  const toast = toastArea.querySelector(`[data-toast-task="${taskId}"]`);
+  if (toast) {
     toast.remove();
-  }, 9000);
+  }
+}
+
+// Windows draws the OS notification itself, so no CSS applies. The icon is the
+// only piece we control, so paint one in the app's colours instead of letting
+// Chrome fall back to its generic globe.
+let cachedIconUrl = null;
+
+function notificationIcon() {
+  if (cachedIconUrl) {
+    return cachedIconUrl;
+  }
+
+  const size = 192;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  const base = ctx.createLinearGradient(0, 0, size, size);
+  base.addColorStop(0, "#071a3d");
+  base.addColorStop(1, "#01060f");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  const glow = ctx.createRadialGradient(size / 2, size * 0.74, 0, size / 2, size * 0.74, size * 0.72);
+  glow.addColorStop(0, "rgba(41, 214, 255, 0.9)");
+  glow.addColorStop(0.55, "rgba(41, 214, 255, 0.25)");
+  glow.addColorStop(1, "rgba(41, 214, 255, 0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.font = `${Math.round(size * 0.52)}px system-ui, "Segoe UI Emoji", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("⏰", size / 2, size / 2);
+
+  cachedIconUrl = canvas.toDataURL("image/png");
+  return cachedIconUrl;
 }
 
 function showBrowserNotification(task) {
@@ -309,22 +369,56 @@ function showBrowserNotification(task) {
     return;
   }
 
-  new Notification(task.remind_before ? "Upcoming task" : "Task due", {
+  const notification = new Notification(task.remind_before ? "Upcoming task" : "Task due", {
     body: `${task.title} — ${reminderSentence(task)}`,
     tag: `task-${task.id}`,
+    icon: notificationIcon(),
+    badge: notificationIcon(),
+    // the wide hero image is what makes the popup render large rather than as a
+    // single compact line
+    image: "/static/blue-ui.jpg",
+    // stay on screen until dealt with, matching the in-page toast
+    requireInteraction: true,
   });
+
+  // clicking it brings the planner back to the front
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
 }
 
 async function checkDueTasks() {
   const response = await fetch("/api/due");
   const data = await response.json();
 
+  const outstanding = new Set();
+  let announced = false;
+
   for (const task of data.tasks) {
+    outstanding.add(String(task.id));
+
+    if (dismissedReminders.has(task.id)) {
+      continue;
+    }
+
     showToast(task);
-    showBrowserNotification(task);
+
+    // the OS popup is a one-off event, unlike the toast
+    if (task.fresh) {
+      showBrowserNotification(task);
+      announced = true;
+    }
   }
 
-  if (data.tasks.length > 0) {
+  // drop toasts for tasks completed or deleted somewhere else
+  for (const toast of toastArea.querySelectorAll("[data-toast-task]")) {
+    if (!outstanding.has(toast.dataset.toastTask)) {
+      toast.remove();
+    }
+  }
+
+  if (announced) {
     await loadMonth();
   }
 }
@@ -362,6 +456,23 @@ selectedTaskList.addEventListener("change", async (event) => {
   }
 
   await setReminder(Number(reminderPicker.dataset.remind), Number(reminderPicker.value));
+});
+
+toastArea.addEventListener("click", async (event) => {
+  const doneButton = event.target.closest("[data-toast-done]");
+  const dismissButton = event.target.closest("[data-toast-dismiss]");
+
+  if (doneButton) {
+    const taskId = Number(doneButton.dataset.toastDone);
+    clearToast(taskId);
+    await toggleTask(taskId, true);
+  }
+
+  if (dismissButton) {
+    const taskId = Number(dismissButton.dataset.toastDismiss);
+    dismissedReminders.add(taskId);
+    clearToast(taskId);
+  }
 });
 
 taskDate.addEventListener("change", () => {
