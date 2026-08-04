@@ -1,7 +1,30 @@
 from __future__ import annotations
 
+import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# Due times are stored as the wall-clock time the user typed in their browser,
+# so every comparison has to happen in that same timezone. Hosts like
+# PythonAnywhere run on UTC, which would otherwise fire reminders hours late.
+TZ_NAME = os.environ.get("SCHEDULE_TZ", "Asia/Karachi")
+
+try:
+    from zoneinfo import ZoneInfo
+
+    APP_TZ = ZoneInfo(TZ_NAME)
+except Exception:  # no tzdata on the host
+    APP_TZ = timezone(timedelta(hours=5))  # Pakistan Standard Time, no DST
+
+
+def local_now() -> datetime:
+    """Current wall-clock time in the app's timezone, naive so it compares
+    directly against the stored due_at / due_date values."""
+    return datetime.now(APP_TZ).replace(tzinfo=None)
+
+
+def local_today():
+    return local_now().date()
 
 
 def get_due_tasks(
@@ -14,7 +37,7 @@ def get_due_tasks(
         The reminder fires `remind_before` minutes ahead of `due_at`,
         so a value of 0 still means "remind me at the due time".
         """
-        current_time = now or datetime.now()
+        current_time = now or local_now()
         rows = conn.execute(
         """
         SELECT id, title, notes, due_date, due_time, due_at, remind_before,
