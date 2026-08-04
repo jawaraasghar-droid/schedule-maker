@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, session
 import uuid
-from notifications import get_due_tasks, mark_notified
+from notifications import get_due_tasks, local_today, mark_notified
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -111,7 +111,7 @@ def month_payload(year: int, month: int) -> dict:
     weeks = cal.monthdatescalendar(year, month)
     start = weeks[0][0].isoformat()
     end = weeks[-1][-1].isoformat()
-    today = date.today().isoformat()
+    today = local_today().isoformat()
 
     with get_db() as conn:
         rows = conn.execute(
@@ -156,7 +156,7 @@ def month_payload(year: int, month: int) -> dict:
 
 
 def current_month_params() -> tuple[int, int]:
-    today = date.today()
+    today = local_today()
     year = request.args.get("year", default=today.year, type=int)
     month = request.args.get("month", default=today.month, type=int)
 
