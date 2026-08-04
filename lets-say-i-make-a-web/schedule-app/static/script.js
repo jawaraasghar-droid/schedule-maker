@@ -1,7 +1,7 @@
 const state = {
   year: Number(document.body.dataset.year),
   month: Number(document.body.dataset.month),
-  selectedDate: new Date().toISOString().slice(0, 10),
+  selectedDate: localDateKey(),
   calendar: null,
 };
 
@@ -20,6 +20,15 @@ const taskRemind = document.querySelector("#taskRemind");
 const formMessage = document.querySelector("#formMessage");
 const toastArea = document.querySelector("#toastArea");
 const notifyButton = document.querySelector("#notifyButton");
+
+// toISOString() would give the UTC date, which is the previous day here for the
+// first hours after midnight. Build the key from local calendar fields instead.
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -269,7 +278,7 @@ function leadPhrase(minutes) {
 }
 
 function reminderSentence(task) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey();
   const when = task.due_date === today
     ? `today at ${formatTime(task.due_time)}`
     : `${formatDateLabel(task.due_date)} at ${formatTime(task.due_time)}`;
