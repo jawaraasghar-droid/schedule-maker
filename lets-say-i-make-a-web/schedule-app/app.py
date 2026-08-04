@@ -37,6 +37,7 @@ def init_db() -> None:
                 due_date TEXT NOT NULL,
                 due_time TEXT NOT NULL,
                 due_at TEXT NOT NULL,
+                remind_before INTEGER NOT NULL DEFAULT 0,
                 completed INTEGER NOT NULL DEFAULT 0,
                 notified INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -59,7 +60,15 @@ def init_db() -> None:
                 "UPDATE tasks SET user_id = 'old_user'"
             )
 
+        if "remind_before" not in columns:
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN remind_before INTEGER NOT NULL DEFAULT 0"
+            )
+
         conn.commit()
+
+
+MAX_REMIND_BEFORE = 7 * 24 * 60
 
 
 def task_to_dict(row: sqlite3.Row) -> dict:
@@ -70,6 +79,7 @@ def task_to_dict(row: sqlite3.Row) -> dict:
         "due_date": row["due_date"],
         "due_time": row["due_time"],
         "due_at": row["due_at"],
+        "remind_before": row["remind_before"] or 0,
         "completed": bool(row["completed"]),
         "notified": bool(row["notified"]),
         "created_at": row["created_at"],
@@ -78,6 +88,22 @@ def task_to_dict(row: sqlite3.Row) -> dict:
 
 def parse_due(due_date: str, due_time: str) -> datetime:
     return datetime.strptime(f"{due_date} {due_time}", "%Y-%m-%d %H:%M")
+
+
+def parse_remind_before(value) -> int:
+    """Minutes before the due time to fire the reminder. 0 means at the due time."""
+    if value is None or value == "":
+        return 0
+
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("Reminder must be a number of minutes.")
+
+    if minutes < 0 or minutes > MAX_REMIND_BEFORE:
+        raise ValueError("Reminder must be between 0 minutes and 7 days.")
+
+    return minutes
 
 
 def month_payload(year: int, month: int) -> dict:
@@ -90,7 +116,7 @@ def month_payload(year: int, month: int) -> dict:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
+            SELECT id, title, notes, due_date, due_time, due_at, remind_before, completed, notified, created_at
             FROM tasks
             WHERE user_id = ?
             AND due_date BETWEEN ? AND ?
@@ -170,20 +196,33 @@ def create_task():
     except ValueError:
         return jsonify({"error": "Use a valid date and time."}), 400
 
+    try:
+        remind_before = parse_remind_before(data.get("remind_before"))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
     with get_db() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO tasks (user_id, title, notes, due_date, due_time, due_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (user_id, title, notes, due_date, due_time, due_at, remind_before)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (session["user_id"], title, notes, due_date, due_time, due.strftime("%Y-%m-%d %H:%M:%S")),
+            (
+                session["user_id"],
+                title,
+                notes,
+                due_date,
+                due_time,
+                due.strftime("%Y-%m-%d %H:%M:%S"),
+                remind_before,
+            ),
         )
         task_id = cursor.lastrowid
         conn.commit()
 
         task = conn.execute(
             """
-            SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
+            SELECT id, title, notes, due_date, due_time, due_at, remind_before, completed, notified, created_at
             FROM tasks
             WHERE id = ? AND user_id = ?
             """,
@@ -200,7 +239,7 @@ def update_task(task_id: int):
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
+            SELECT id, title, notes, due_date, due_time, due_at, remind_before, completed, notified, created_at
             FROM tasks
             WHERE id = ? AND user_id = ?
             """,
@@ -224,24 +263,43 @@ def update_task(task_id: int):
         except ValueError:
             return jsonify({"error": "Use a valid date and time."}), 400
 
+        try:
+            remind_before = parse_remind_before(
+                data.get("remind_before", row["remind_before"])
+            )
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+
         due_at = due.strftime("%Y-%m-%d %H:%M:%S")
-        notified = 0 if due_at != row["due_at"] else row["notified"]
+        reminder_moved = due_at != row["due_at"] or remind_before != (row["remind_before"] or 0)
+        notified = 0 if reminder_moved else row["notified"]
 
         conn.execute(
             """
             UPDATE tasks
             SET title = ?, notes = ?, due_date = ?, due_time = ?, due_at = ?,
-                completed = ?, notified = ?
+                remind_before = ?, completed = ?, notified = ?
             WHERE id = ?
             AND user_id = ?
             """,
-            (title, notes, due_date, due_time, due_at, completed, notified, task_id, session["user_id"]),
+            (
+                title,
+                notes,
+                due_date,
+                due_time,
+                due_at,
+                remind_before,
+                completed,
+                notified,
+                task_id,
+                session["user_id"],
+            ),
         )
         conn.commit()
 
         updated = conn.execute(
             """
-            SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
+            SELECT id, title, notes, due_date, due_time, due_at, remind_before, completed, notified, created_at
             FROM tasks
             WHERE id = ?
             AND user_id = ?
