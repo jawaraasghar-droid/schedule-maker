@@ -16,6 +16,7 @@ const taskTitle = document.querySelector("#taskTitle");
 const taskDate = document.querySelector("#taskDate");
 const taskTime = document.querySelector("#taskTime");
 const taskNotes = document.querySelector("#taskNotes");
+const taskRemind = document.querySelector("#taskRemind");
 const formMessage = document.querySelector("#formMessage");
 const toastArea = document.querySelector("#toastArea");
 const notifyButton = document.querySelector("#notifyButton");
@@ -47,6 +48,40 @@ function formatTime(timeText) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+const REMINDER_CHOICES = [0, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080];
+
+function formatLead(minutes) {
+  if (!minutes) {
+    return "At time";
+  }
+
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} day${days > 1 ? "s" : ""} before`;
+  }
+
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours > 1 ? "s" : ""} before`;
+  }
+
+  return `${minutes} min before`;
+}
+
+function reminderSelect(task) {
+  // keep a custom value set through the API selectable instead of silently resetting it
+  const choices = REMINDER_CHOICES.includes(task.remind_before)
+    ? REMINDER_CHOICES
+    : [...REMINDER_CHOICES, task.remind_before].sort((a, b) => a - b);
+
+  const options = choices.map((minutes) => {
+    const chosen = minutes === task.remind_before ? " selected" : "";
+    return `<option value="${minutes}"${chosen}>${formatLead(minutes)}</option>`;
+  }).join("");
+
+  return `<select class="reminder-select" data-remind="${task.id}" aria-label="Reminder time">${options}</select>`;
 }
 
 function allTasksForDate(dateText) {
@@ -142,6 +177,10 @@ function renderSelectedDay() {
             <span class="task-time">${formatTime(task.due_time)}</span>
           </div>
           ${task.notes ? `<p class="task-notes">${escapeHtml(task.notes)}</p>` : ""}
+          <div class="task-reminder">
+            <span class="reminder-icon" aria-hidden="true">&#9200;</span>
+            ${reminderSelect(task)}
+          </div>
           <div class="task-actions">
             <button class="small-button" type="button" data-toggle="${task.id}">
               ${task.completed ? "Reopen" : "Done"}
@@ -171,6 +210,7 @@ async function addTask(event) {
     due_date: taskDate.value,
     due_time: taskTime.value,
     notes: taskNotes.value.trim(),
+    remind_before: Number(taskRemind.value),
   };
 
   const response = await fetch("/tasks", {
@@ -200,9 +240,45 @@ async function toggleTask(taskId, completed) {
   await loadMonth();
 }
 
+async function setReminder(taskId, remindBefore) {
+  await fetch(`/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ remind_before: remindBefore }),
+  });
+  await loadMonth();
+}
+
 async function deleteTask(taskId) {
   await fetch(`/tasks/${taskId}`, { method: "DELETE" });
   await loadMonth();
+}
+
+function leadPhrase(minutes) {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return `${days} day${days > 1 ? "s" : ""}`;
+  }
+
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours > 1 ? "s" : ""}`;
+  }
+
+  return `${minutes} minutes`;
+}
+
+function reminderSentence(task) {
+  const today = new Date().toISOString().slice(0, 10);
+  const when = task.due_date === today
+    ? `today at ${formatTime(task.due_time)}`
+    : `${formatDateLabel(task.due_date)} at ${formatTime(task.due_time)}`;
+
+  if (!task.remind_before) {
+    return `Due ${when}`;
+  }
+
+  return `Starts in ${leadPhrase(task.remind_before)} — ${when}`;
 }
 
 function showToast(task) {
@@ -210,7 +286,7 @@ function showToast(task) {
   toast.className = "toast";
   toast.innerHTML = `
     <strong>${escapeHtml(task.title)}</strong>
-    <p>Due today at ${formatTime(task.due_time)}</p>
+    <p>${escapeHtml(reminderSentence(task))}</p>
   `;
   toastArea.appendChild(toast);
 
@@ -224,8 +300,8 @@ function showBrowserNotification(task) {
     return;
   }
 
-  new Notification("Task due", {
-    body: `${task.title} is due at ${formatTime(task.due_time)}`,
+  new Notification(task.remind_before ? "Upcoming task" : "Task due", {
+    body: `${task.title} — ${reminderSentence(task)}`,
     tag: `task-${task.id}`,
   });
 }
@@ -268,6 +344,15 @@ selectedTaskList.addEventListener("click", async (event) => {
   if (deleteButton) {
     await deleteTask(Number(deleteButton.dataset.delete));
   }
+});
+
+selectedTaskList.addEventListener("change", async (event) => {
+  const reminderPicker = event.target.closest("[data-remind]");
+  if (!reminderPicker) {
+    return;
+  }
+
+  await setReminder(Number(reminderPicker.dataset.remind), Number(reminderPicker.value));
 });
 
 taskDate.addEventListener("change", () => {
