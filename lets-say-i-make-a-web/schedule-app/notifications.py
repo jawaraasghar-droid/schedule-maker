@@ -8,17 +8,22 @@ def get_due_tasks(
     conn: sqlite3.Connection,
     user_id: str,
     now: datetime | None = None,
-    ) -> list[dict]:    
+    ) -> list[dict]:
+        """Tasks whose reminder time has arrived and that have not been announced yet.
+
+        The reminder fires `remind_before` minutes ahead of `due_at`,
+        so a value of 0 still means "remind me at the due time".
+        """
         current_time = now or datetime.now()
         rows = conn.execute(
         """
-        SELECT id, title, notes, due_date, due_time, due_at, completed, notified, created_at
+        SELECT id, title, notes, due_date, due_time, due_at, remind_before,
+               completed, notified, created_at
         FROM tasks
         WHERE user_id = ?
           AND completed = 0
-          AND user_id = ?
           AND notified = 0
-          AND due_at <= ?
+          AND datetime(due_at, '-' || remind_before || ' minutes') <= ?
         ORDER BY due_at ASC
         """,
         (user_id, current_time.strftime("%Y-%m-%d %H:%M:%S")),
@@ -32,6 +37,7 @@ def get_due_tasks(
             "due_date": row["due_date"],
             "due_time": row["due_time"],
             "due_at": row["due_at"],
+            "remind_before": row["remind_before"] or 0,
             "completed": bool(row["completed"]),
             "notified": bool(row["notified"]),
             "created_at": row["created_at"],
