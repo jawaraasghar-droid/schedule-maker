@@ -329,7 +329,7 @@ def api_due():
         conn,
         session["user_id"],
 )
-        mark_notified(conn, [task["id"] for task in due_tasks])
+        mark_notified(conn, [task["id"] for task in due_tasks if task["fresh"]])
         conn.commit()
 
     return jsonify({"tasks": due_tasks})
