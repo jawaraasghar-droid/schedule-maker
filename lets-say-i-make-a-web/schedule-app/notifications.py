@@ -32,10 +32,14 @@ def get_due_tasks(
     user_id: str,
     now: datetime | None = None,
     ) -> list[dict]:
-        """Tasks whose reminder time has arrived and that have not been announced yet.
+        """Every reminder that is currently outstanding.
 
-        The reminder fires `remind_before` minutes ahead of `due_at`,
-        so a value of 0 still means "remind me at the due time".
+        A reminder becomes outstanding `remind_before` minutes ahead of `due_at`
+        (0 meaning "at the due time") and stays outstanding until the task is
+        marked complete -- so the toast can sit on screen and survive a reload.
+
+        `fresh` marks the ones never announced before, so the one-off OS
+        notification fires once instead of on every poll.
         """
         current_time = now or local_now()
         rows = conn.execute(
@@ -45,7 +49,6 @@ def get_due_tasks(
         FROM tasks
         WHERE user_id = ?
           AND completed = 0
-          AND notified = 0
           AND datetime(due_at, '-' || remind_before || ' minutes') <= ?
         ORDER BY due_at ASC
         """,
@@ -63,6 +66,7 @@ def get_due_tasks(
             "remind_before": row["remind_before"] or 0,
             "completed": bool(row["completed"]),
             "notified": bool(row["notified"]),
+            "fresh": not bool(row["notified"]),
             "created_at": row["created_at"],
         }
         for row in rows
